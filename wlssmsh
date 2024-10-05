@@ -1,0 +1,77 @@
+#!/bin/dash
+
+# check if required softwares are available
+for i in grim slurp feh swappy ydotool; do
+    if ! which $i >/dev/null 2>&1; then
+        notify-send -t 9000 " --- "$i" is not installed --- " \
+            "It requires grim, slurp, feh and swappy."
+        exit 0
+    fi
+done
+if ! pgrep ydotoold >/dev/null 2>&1; then
+    notify-send -t 9000 " --- ydotoold is not running --- " \
+        "It has been started by running $ sudo ydotool &"
+    sudo ydotoold & >/dev/null 2>&1
+    exit 0
+fi
+
+# mouse left button state
+MSHDIR=/tmp/minsoehan.msh.9.d
+mkdir -p "$MSHDIR"
+MLBFILE="$MSHDIR"/wlssmsh-mlbstate
+
+[ ! -f "$MLBFILE" ] && echo "0" > "$MLBFILE"
+
+# mouse left hold-down and release function
+mouseleftbutton_func () {
+    local MLBSTATE="$(cat "$MLBFILE")"
+    if [ $((MLBSTATE)) -eq 0 ]; then
+        sudo ydotool click 0x40 >/dev/null 2>&1
+        echo "1" > "$MLBFILE"
+        watchmousebuttonleft_func
+    else
+        sudo ydotool click 0x80 >/dev/null 2>&1
+        echo "0" > "$MLBFILE"
+    fi
+    exit 0
+}
+
+# watch mousebuttonleft
+watchmousebuttonleft_func () {
+
+    local COUNTER=0
+    local MAXWAIT=30
+
+    while [ $COUNTER -lt $MAXWAIT ]; do
+        local MLBWHILE="$(cat "$MLBFILE")"
+        if [ $((MLBWHILE)) -eq 0 ]; then
+            break
+        fi
+        sleep 1
+        local COUNTER=$((COUNTER+1))
+    done
+
+    if [ $((MLBSTATE)) -ne 0 ]; then
+        sudo ydotool click 0x80 >/dev/null 2>&1
+        echo "0" > "$MLBFILE"
+    fi
+}
+
+# selectandview function
+selectandview_func () {
+    if ! pgrep slurp >/dev/null 2>&1; then
+        grim -g "$(slurp)" - | feh -B black --auto-zoom - &
+    else
+        mouseleftbutton_func
+    fi
+}
+
+# ss for fullscreen, clipboard, swappy and feh
+case $1 in
+    fss) grim - | wl-copy & ;;
+    css) grim -g "$(slurp)" - | wl-copy & ;;
+    sss) grim -g "$(slurp)" - | swappy -f - & ;;
+    vss) selectandview_func ;;
+    mlb) mouseleftbutton_func ;;
+    *) exit 0 ;;
+esac

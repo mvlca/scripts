@@ -1,0 +1,266 @@
+#!/bin/dash
+
+# check if it is run as root
+if [ $(($(id -u))) -eq 0 ]; then
+    exit 0
+fi
+# check if it is in terminal
+case "$(ps -o stat= -p $$)" in
+    *+*) echo "continue..." ;;
+    *) notify-send -t 2700 "clean exit" "please run it in terminal."; exit 0 ;;
+esac
+# test if it is already running or exit.
+SCRIPTNAME="$(basename -- $0)"
+if pidof -x "$SCRIPTNAME" -o $$ >/dev/null 2>&1; then
+    echo "the script is already running. clean exit."
+    exit 0
+fi
+
+cd "$PWD"
+
+# check if other files exist in PWD
+if ls . | grep -vw 'dwl.*\|[0-9][0-9]-.*\.diff\|mshconfig' >/dev/null 2>&1; then
+    echo "There are other files in PWD. Check them first. Clean exit."
+    exit 0
+fi
+
+cleanpwd_func () {
+    if [ -d ./dwl ]; then
+        read -p "dwl folder exists. Delete? [y|N]: " DELCON
+        case $DELCON in
+            y|Y|yes|Yes) rm -rf ./dwl ;;
+            *) echo "dwl folder was LEFT intact."; exit 0 ;;
+        esac
+    fi
+    local OFOFI=$(ls ./ | grep -vw dwl)
+    if [ -n "$OFOFI" ]; then
+        read -p "other files exist. Delete them? [y|N]: " DELCON
+        case $DELCON in
+            y|Y|yes|Yes)
+                rm -rf ./dwl
+                for i in $OFOFI; do
+                    [ -d "$i" ] && rm -rf "$i"
+                    [ -f "$i" ] && rm "$i"
+                done
+                ;;
+            *) echo "other files were LEFT intact."; exit 0 ;;
+        esac
+    fi
+}
+
+mshconfig_func () {
+    if [ -f ./mshconfig ]; then
+        echo "mshconfig file exists and skipped to download."
+    else
+        echo "mshconfig file does not exist and downloading the file."
+        wget https://codeberg.org/minsoehan/dmhpr/raw/branch/main/mshconfig
+    fi
+}
+
+getdwl_func () {
+    if [ -z "$2" ]; then
+        git clone https://codeberg.org/dwl/dwl.git
+    else
+        wget https://codeberg.org/dwl/dwl/releases/download/"$2"/dwl-"$2".tar.gz || exit 0
+        tar -xzf ./dwl-"$2".tar.gz
+        mv dwl-"$2" dwl
+    fi
+}
+
+dlpatch_func () {
+    local DLURL=$(grep ^PATCHESURL ./mshconfig | cut -d '"' -f 2)
+    local PATCH=$(sed -n '/^patches =/,/^}/p' ./mshconfig | sed '1d;$d;s/^\s*//')
+    NUM=1
+    for i in $PATCH; do
+        local ZLN=$(printf "%02d" "$NUM")
+        wget -O "$ZLN"-"$i".diff "$DLURL"/"$i"/"$i".patch
+        local NUM=$((NUM + 1))
+    done
+}
+
+enterdir_func () {
+    local CDIR="$(basename "$(echo "$PWD")")"
+    if [ "$CDIR" = "dwl" ]; then
+        echo "alread in dwl directory."
+    else
+        [ -d ./dwl ] && cd ./dwl || echo "no dwl folder. git clone dwl first."
+    fi
+}
+
+patchdwl_func () {
+    local PATCHFILE=$(ls ../ | grep [0-9][0-9].*\.diff)
+    [ -z "$PATCHFILE" ] && echo "Oop! no patch files. Download them first." && exit 0
+    for i in $PATCHFILE; do
+        patch -p1 < ../"$i"
+        local REJ=$(ls . | grep .*.rej$)
+        [ -z "$REJ" ] && continue
+        for ii in $REJ; do
+            local SCF=$(echo "$ii" | sed 's/\.rej$//')
+            nvim -o "$ii" "$SCF"
+            echo "checking and deleting .rej file[s]..."; sleep 0.5
+            rm *\.rej
+            sleep 0.5
+        done
+    done
+}
+
+dlextra_func () {
+    local EXFILE=$(sed -n '/^extrafiles =/,/^}/p' ../mshconfig | sed '1d;$d;s/^\s*//')
+    local EDLRUL=$(grep ^MSHREPOURL ../mshconfig | cut -d '"' -f 2)
+    for i in $EXFILE; do
+        [ -f "$i" ] && rm ./"$i"
+        wget "$EDLRUL"/"$i"
+    done
+}
+
+config_func () {
+    mkdir -p ./cdwlbkp
+    cp ./config.def.h ./config.h
+    local TGROUP=$(sed -n '/^config = {/,/^}/p' ../mshconfig | sed '1d;$d;s/^\s*//')
+    local TARGET=$(echo "$TGROUP" | grep "^[a-zA-Z0-9].*\s*=\s*{" | cut -d ' ' -f 1)
+    for i in $TARGET; do
+        cp ./"$i" ./cdwlbkp/"$i"
+        local CLINE=$(echo "$TGROUP" | sed -n "/^${i}\s*=\s*{/,/^}/p" | \
+            sed '1d;$d;s/",\s*"/",%"/g;s/\s/\\s/g;s/\[/\\[/g;s/\]/\\]/g;s/\*/\\*/g')
+        for ii in $CLINE; do
+            local CONA=$(echo "$ii" | cut -d '"' -f 2)
+            local CONB=$(echo "$ii" | cut -d '"' -f 4)
+            local CONC=$(echo "$ii" | cut -d '"' -f 6)
+            if [ -n "$CONA" ] && [ -z "$CONB" ] && [ -z "$CONC" ]; then
+                while true; do
+                    unset CONAC
+                    sed -f ./"$CONA" ./"$i" > ./cdwlbkp/"$i".tmp
+                    echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+                    echo; cat ./cdwlbkp/"$i".tmp; echo
+                    read -p "Check changes and confirm? [Y/n]: " CONAC
+                    case $CONAC in
+                        n|N|no|No) read -p "Review and revise ./"$CONA" file and Enter to continue: " && continue ;;
+                        *) rm ./"$i" && cp ./cdwlbkp/"$i".tmp ./"$i" && rm ./cdwlbkp/"$i".tmp && break ;;
+                    esac
+                done
+                continue
+            fi
+            if [ -n "$CONA" ] && [ -n "$CONB" ] && [ -z "$CONC" ]; then
+                while true; do
+                    unset CONBC SLINE ELINE
+                    echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+                    echo; cat -n "$i" | sed -n "/[0-9]\s${CONA}/,/[0-9]\s${CONB}/p"; echo
+                    read -p "Line number of START deletion: " SLINE
+                    read -p "Line number of END deletion: " ELINE
+                    sed "${SLINE},${ELINE}d" "$i" > ./cdwlbkp/"$i".tmp
+                    echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+                    echo; sed -n "/^${CONA}/,/^${CONB}/p" ./cdwlbkp/"$i".tmp; echo
+                    read -p "Check changes and confirm? [Y/n]; " CONBC
+                    case $CONBC in
+                        n|N|no|No) rm ./cdwlbkp/"$i".tmp && continue ;;
+                        *) rm ./"$i" && cp ./cdwlbkp/"$i".tmp ./"$i" && rm ./cdwlbkp/"$i".tmp && break ;;
+                    esac
+                done
+                continue
+            fi
+            if [ -n "$CONA" ] && [ -n "$CONB" ] && [ -n "$CONC" ]; then
+                while true; do
+                    unset CONCC ALINE
+                    echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+                    echo; cat -n "$i" | sed -n "/[0-9]\s${CONA}/,/[0-9]\s${CONB}/p"; echo
+                    read -p "Line number after which INSERT will comes : " ALINE
+                    sed "${ALINE} r ${CONC}" "$i" > ./cdwlbkp/"$i".tmp
+                    echo " = = = = = = = = = = = = = = = = = = = = = = = = = = = "
+                    echo; sed -n "/^${CONA}/,/^${CONB}/p" ./cdwlbkp/"$i".tmp; echo
+                    read -p "Check changes and confirm? [Y/n]; " CONBC
+                    case $CONBC in
+                        n|N|no|No) rm ./cdwlbkp/"$i".tmp && continue ;;
+                        *) rm ./"$i" && cp ./cdwlbkp/"$i".tmp ./"$i" && rm ./cdwlbkp/"$i".tmp && break ;;
+                    esac
+                done
+                continue
+            fi
+        done
+        # deleting duplicated blank line[s]
+        sed '/^$/N;/^\n$/D' -i "$i"
+    done
+    echo "
+    moving unneeded files to ./cdwlbkp directory.
+    "
+    mv ./*.sed ./cdwlbkp/
+    mv ./*.ins ./cdwlbkp/
+    mv ./*.orig ./cdwlbkp/
+    [ -d ./.git ] && rm -rf ./.git
+    [ -d ./.gitea ] && rm -rf ./.gitea
+    [ -f ./.gitignore ] && rm -f "$PWD"/.gitignore
+}
+
+mktes_func () {
+    enterdir_func
+    make clean
+    make
+    [ $(($?)) -ne 0 ] && echo "compilation error..." && exit 0
+    make clean
+}
+
+mkinc_func () {
+    enterdir_func
+    make clean
+    make
+    [ $(($?)) -ne 0 ] && echo "compilation error..." && exit 0
+    echo; read -p "::: Sure to install [y/N]: " INC
+    case $INC in
+        y|Y|yes|Yes)
+            echo "continue..."
+            make install
+            make clean
+            ;;
+        *)
+            make clean
+            echo "Left without installation."
+            exit 0
+            ;;
+    esac
+}
+
+allfunc_func () {
+    cleanpwd_func
+    mshconfig_func
+    getdwl_func "$1" "$2"
+    dlpatch_func
+    enterdir_func
+    patchdwl_func
+    dlextra_func
+    config_func
+}
+
+usagehelp_func () {
+    echo "
+    ~$ ccdwl ver|version   allfunc_func
+    ~$ ccdwl mc|mshconfig  mshconfig_func
+    ~$ ccdwl cp|cleanpwd   cleanpwd_func
+    ~$ ccdwl gw|getdwl     getdwl_func
+    ~$ ccdwl dp|dlpatch    dlpatch_func
+    ~$ ccdwl ed|enterdir   enterdir_func
+    ~$ ccdwl pd|patchdwl   patchdwl_func
+    ~$ ccdwl de|dlextra    dlextra_func
+    ~$ ccdwl cf|config     config_func
+    ~$ ccdwl mt|mktes      mktes_func
+    ~$ ccdwl mic|mkinc     mkinc_func
+    ~$ ccdwl -h|h|help     usagehelp_func
+    ~$ ccdwl               allfunc_func
+    ~$ ccdwl <ELSE>        exit 0
+    "
+}
+
+case $1 in
+    ver|version) allfunc_func "$1" "$2";;
+    mc|mshconfig) mshconfig_func ;;
+    cp|cleanpwd) cleanpwd_func ;;
+    gw|getdwl) getdwl_func "$1" "$2";;
+    dp|dlpatch) dlpatch_func ;;
+    ed|enterdir) enterdir_func ;;
+    pd|patchdwl) patchdwl_func ;;
+    de|dlextra) dlextra_func ;;
+    cf|config) config_func ;;
+    mt|mktes) mktes_func ;;
+    mic|mkinc) mkinc_func ;;
+    -h|h|help) usagehelp_func ;;
+    "") allfunc_func ;;
+    *) exit 0 ;;
+esac

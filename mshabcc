@@ -1,0 +1,41 @@
+#!/bin/dash
+
+# get audio info
+volumeinfo_func () {
+    VOLUME=$(wpctl get-volume @DEFAULT_AUDIO_SINK@)
+    notify-send -t 3000 -h string:x-canonical-private-synchronous:mshccreplace \
+        " " "$VOLUME\n_"
+}
+# get brightness info
+brightnessinfo_func () {
+    BRIGHTNESS=$(brightnessctl | awk -F '[()]' '/Current brightness: / {print $2}')
+    notify-send -t 3000 -h string:x-canonical-private-synchronous:mshccreplace \
+        " " "Screen brightness Level - $BRIGHTNESS\n_"
+}
+
+# mshcc - min soe han control center
+case $1 in
+    mutetoggle|mt)
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
+        volumeinfo_func
+        ;;
+    volumeup|vu)
+        wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+
+        volumeinfo_func
+        ;;
+    volumedown|vd)
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
+        volumeinfo_func
+        ;;
+    brightnessup|bu)
+        brightnessctl -q set +5%
+        brightnessinfo_func
+        ;;
+    brightnessdown|bd)
+        brightnessctl -q set 5%-
+        brightnessinfo_func
+        ;;
+    *)
+        exit 0
+        ;;
+esac

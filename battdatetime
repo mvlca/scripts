@@ -1,0 +1,9 @@
+#!/bin/dash
+
+# BATSTATUS=$(cat /sys/class/power_supply/BAT0/status)
+# BATCAPACITY=$(cat /sys/class/power_supply/BAT0/capacity)
+
+BATTSTAT=$(paste -d ' ' /sys/class/power_supply/BAT0/status /sys/class/power_supply/BAT0/capacity)
+DATETIME=$(date +'%F %A %R - %I:%M %p')
+
+echo "$BATTSTAT% | $DATETIME"

@@ -1,0 +1,58 @@
+#!/bin/dash
+
+# check if it is run as ROOT and exit
+ROOTID=$(id -u)
+if [ $((ROOTID)) -eq 0 ]; then
+    notify-send -t 2700 "It is run as ROOT." "Please run it as NORMAL USER."
+    exit 0
+fi
+
+# check if it is already running and exit
+SCRIPTNAME=$(basename -- "$0")
+if pidof -x "$SCRIPTNAME" -o $$ > /dev/null 2>&1; then
+    notify-send -t 2700 "ALREADY RUNNING" "It is already running. Clean exit."
+    exit 0
+fi
+
+# EDIT battery directory as required
+BATDIR=/sys/class/power_supply/BAT0
+# check if required files are found
+if [ ! -f "$BATDIR"/status ] || [ ! -f "$BATDIR"/capacity ]; then
+    notify-send -t 2700 "FILE NOT FOUND" "One or both of required files was not found."
+    exit 0
+fi
+
+# battery noti switch file
+mkdir -p /tmp/minsoehan.msh.9.d
+BATNOTIFILE=/tmp/minsoehan.msh.9.d/mshbattnotionoff
+
+echo "1" > "$BATNOTIFILE"
+
+while true; do
+    [ ! -f "$BATNOTIFILE" ] && echo "1" > "$BATNOTIFILE"
+    BNSTATE=$(cat "$BATNOTIFILE")
+    BATCAP=$(cat "$BATDIR"/capacity)
+    BATSTATUS=$(cat "$BATDIR"/status)
+    if [ "$BATSTATUS" = "Discharging" ]; then
+        if [ $((BATCAP)) -lt 15 ]; then
+            systemctl poweroff
+        fi
+        if [ $((BATCAP)) -lt 25 ]; then
+            notify-send -u critical -t 9000 "CHARGE BATTERY URGENTLY" "Battery power is critically low. Charge it now, otherwise the computer will poweroff soon.\n"$BATSTATUS" @ "$BATCAP"%"
+            sleep 20
+            continue
+        fi
+        if [ $((BNSTATE)) -eq 1 ] && [ $((BATCAP)) -lt 40 ]; then
+            notify-send -t 9000 "CHARGE BATTERY" "Battery power is under 40%. It is recommended to charge the battery for its health.\n"$BATSTATUS" @ "$BATCAP"%"
+            sleep 30
+            continue
+        fi
+    else
+        if [ $((BNSTATE)) -eq 1 ] && [ $((BATCAP)) -gt 80 ]; then
+            notify-send -t 9000 "STOP CHARGING BATTERY" "Battery power is over 80%. It is recommended to STOP charging the battery for its health.\n"$BATSTATUS" @ "$BATCAP"%"
+            sleep 30
+            continue
+        fi
+    fi
+    sleep 60
+done &
